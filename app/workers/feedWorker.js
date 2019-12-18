@@ -7,7 +7,3 @@ const redditClient = require('../clients/RedditClient.js');
 
 var ig = new instagramClient();
 var red = new redditClient();
-
-// ig.consumeFeed();
-// red.workMainFeeds();
-
