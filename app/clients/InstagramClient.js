@@ -20,12 +20,8 @@ const STATUS_PAUSED = 2;
 const STATUS_DELETED = 3;
 const axios = require('axios');
 const mysql      = require('mysql');
-const connection = mysql.createConnection({
-  host     : '127.0.0.1',
-  user     : 'root',
-  password : 'root',
-  database : 'datatentacles'
-});
+const config = require('config');
+const connection = mysql.createConnection(config.get('dbConfig'));
 connection.connect();
 var postsKey = new Set();
 
@@ -306,10 +302,12 @@ class InstagramClient
       				// self.postQueue.push(item.node.shortcode); //for detailed posts
       				var wasNews = self.addPostToQueue(item.node.shortcode); //for detailed posts
       				if(wasNews){
+      					var dataString = JSON.stringify(item.node);
+//FIX THISSSSS      					// self.extractHashtags(item.node.shortcode, dataString);
       					posts.push([
 			    			feedID,
 							item.node.shortcode,
-							JSON.stringify(item.node)
+							dataString
       					])
       				}
 			    });
@@ -367,6 +365,35 @@ class InstagramClient
 		    // always executed
 		    self.workPostFeed();	    
 		  });
+	}
+
+	extractHashtags(shortcode, content) 
+	{
+
+		var validTags = [];
+		var reg = /#[a-zA-Z0-9_\-]* /gi;
+		var result;
+		while((result = reg.exec(content)) !== null) {
+		    // console.log("Found tag "+result+" on shortcode: "+shortcode);
+		    validTags.push([shortcode,(result+"").trim()]);
+		}
+		if(validTags.length>0) {
+			console.log("inserting "+validTags.length+" instagram hashtag rows");
+			console.log(validTags);
+			connection.query(`
+			INSERT IGNORE INTO ig_posts_hashtags 
+			(shortcode, hashtag)
+			VALUES
+			?
+			`, validTags, function (error, results, fields) {
+				if (error) {
+					throw error;
+				}
+				console.log(results);
+			});	
+		} else {
+			// console.log("no hashtags");
+		}
 	}
 
 	/*

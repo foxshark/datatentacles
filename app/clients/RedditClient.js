@@ -48,12 +48,8 @@ const STATUS_PAUSED = 2;
 const STATUS_DELETED = 3;
 const axios = require('axios');
 const mysql      = require('mysql');
-const connection = mysql.createConnection({
-  host     : '127.0.0.1',
-  user     : 'root',
-  password : 'root',
-  database : 'datatentacles'
-});
+const config = require('config');
+const connection = mysql.createConnection(config.get('dbConfig'));
 connection.connect();
 var openQueries = 0;
 var postIteration = 0;

@@ -20,6 +20,7 @@
   "homepage": "https://bitbucket.org/foxshark/windscrape#readme",
   "dependencies": {
     "axios": "^0.19.0",
+    "config": "^3.2.4",
     "express": "^4.17.1",
     "jade": "^1.11.0",
     "moment": "^2.24.0",
