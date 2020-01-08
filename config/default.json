@@ -4,5 +4,23 @@
     "user"     : "root",
     "password" : "root",
     "database" : "datatentacles"
+  },
+  "oldDbConfig": {
+    "host"     : "127.0.0.1",
+    "user"     : "root",
+    "password" : "root",
+    "database" : "camerascrape"
+  },
+  "ebayRss": {
+    "customFields": {
+      "item": [
+        ["rx:BuyItNowPrice","BuyItNowPrice"],
+        ["rx:CurrentPrice","CurrentPrice"],
+        ["rx:EndTime","EndTime"],
+        ["rx:BidCount","BidCount"],
+        ["rx:Category","Category"],
+        ["rx:AuctionType","AuctionType"]
+      ]
+    }
   }
 }

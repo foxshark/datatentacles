@@ -98,7 +98,7 @@ class InstagramClient
 	regularScrape()
 	{
 		// this.createFeed('https://www.instagram.com/explore/tags/portrait?t=12345');
-		var scrapeInterval = 3200;
+		var scrapeInterval = 10 * 1000; //10s
 		var self = this;
 
 		console.log(scrapeInterval);
@@ -262,7 +262,7 @@ class InstagramClient
 			// console.log(this.postQueue.pop());
 			var shortcode = this.postQueue.pop();
 			this.fetchPostGraph(shortcode);
-			console.log(this.postQueue.length+" posts remaining. Stored post details for "+shortcode);
+			console.log(this.postQueue.length+" IG posts remaining. Stored post details for "+shortcode);
 		}
 	}
 
@@ -270,7 +270,7 @@ class InstagramClient
 	{
 		//__a=1
 		var feedURL = 'https://www.instagram.com/explore/tags/'+feedName.replace(/\#/g, '')+'?__a=1';
-		console.log("Fetching: "+feedName);
+		console.log("IG Fetching: "+feedName);
 		var self = this;
 
 		axios.get(feedURL)
