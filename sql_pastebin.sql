@@ -75,3 +75,13 @@ ON DUPLICATE KEY UPDATE
 
 #analog = 414
 
+#update lots of things
+INSERT INTO ebay_words
+(id, type_id)
+VALUES
+(53,1),
+(141,1),
+(18,1),
+(45,2)
+ON DUPLICATE KEY
+update type_id = VALUES(type_id);
