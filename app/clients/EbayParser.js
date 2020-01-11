@@ -171,9 +171,9 @@ class EbayParser
 						var category = self.ebayCategory[row.category_id]; //todo - can this just be done with stored info?
 						var formattedItem = self.testParse(id, row.title, category);
 						
-						items.push(formattedItem);
+						// items.push(formattedItem);
 					})
-					self.testClassify(items);
+					// self.testClassify(items);
 				}
 			});	
 		}
