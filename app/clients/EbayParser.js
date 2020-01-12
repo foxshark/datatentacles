@@ -121,17 +121,17 @@ class EbayParser
 			var brandSet = [];
 			var brandString = "";
 			for (let [key, value] of Object.entries(item.brand)) {
-			  brandString += key +"(" +value+") " ;
+			  brandString += key +":" +value+" ";
 			  brandSet.push(key);
 			}
-			item.brandName = brandSet.join(", ");
-			item.brandScore = brandString;
-			testItems.push(brandString+"> "+item.title);
+			item.brandName = brandSet.join(" ");
+			item.brandScore = brandString.trim();
+			testItems.push(brandString+" >> "+item.title);
 			batchData.push([item.itemId, JSON.stringify(item)]);
 		})
 		console.log("here!!");
-		console.log(items);
-		console.log(testItems);
+		// console.log(items);
+		// console.log(testItems);
 		this.writeTestJSONData(batchData);
 	}
 
@@ -165,12 +165,17 @@ class EbayParser
 			connection.query(`
 			SELECT id, title, category_id
 			FROM ebay_test
-			WHERE category_id <= 3
+			# // nikon lens test
+			WHERE category_id = 1
+			and feature->>"$.brandName" = "nikon"
+
+			# // generic test
+			# WHERE category_id <= 3
 			# AND id = 122
 			# AND id IN (28,29,34,45,63,70,73,101,107,112,118,122,130,139,160,172,177,184,193,196,210,224,225,226) # for/3rd party
 			# AND id IN (67,319,493,825,1026,1311,1722,2229,2931,2998,3791,3949,3999,4293,4802,5218,5354,5423,7265,7321,7873,8166,8243,9185)# series e
 			# AND id IN (23,8160,6336,6088,6001,5721,9888,4704,7773) # bad characters
-			LIMIT 100
+			# LIMIT 100
 			`, [],function (error, results, fields) {
 				if (error) {
 					throw error;
@@ -185,7 +190,9 @@ class EbayParser
 							.then(item=>{
 									items.push(item);
 									if(self.itemParseQueue <= 0) {
+										process.exit();
 										self.testClassify(items);
+
 									}
 							});
 					})
@@ -230,10 +237,12 @@ class EbayParser
 		};
 
 		return this.generalSanatize(item)
+			// maybe sanatize it such that you pull off only known-good words?
 			.then(item => this.parseReplaceSpecialWords(item))
 			.then(item => this.parseQuality(item))
 			.then(item => this.parseThirdPartyAndSplit(item))
 			.then(item => this.parseBrand(item))
+			.then(item => this.parseFeatureExtraction(item))
 			.then(item => {
 				self.itemParseQueue--;
 				console.log(item);
@@ -345,6 +354,29 @@ class EbayParser
 		});
 	}
 
+	parseFeatureExtraction(item)
+	{
+		item.features = {};
+		var self = this;
+		return new Promise(function(resolve,reject) {
+			self.featureExtractionWordSet.forEach(function(extractionWords){
+				var regex = new RegExp("(?<!\\w)"+extractionWords[2]+"(?!\\w)","gi"); //EX: (?<!\S)series e(?!\S)
+				
+				var feature = item.title.toLowerCase().match(regex); //replace w/ what is specified
+				if(feature != null) {
+					item.features[extractionWords[1]] = feature.map(f => f.replace(" ",""));
+				} else {
+					item.features[extractionWords[1]] = [];
+				}
+				// item.regex = regex;
+			})
+			
+			// console.log(item.featureTitle);
+			// process.exit();
+			resolve(item);
+		});
+	}
+
 
 	parseQuality(item)
 	{
@@ -415,18 +447,26 @@ class EbayParser
 		var self = this;
 		return new Promise(function(resolve,reject) {
 			connection.query(`
-			SELECT search_str, replace_str
-			FROM ebay_word_replacements
+			SELECT id, search_str, replace_str, action_type
+			FROM ebay_word_actions
+			# WHERE action_type = 1
 			`, [],function (error, results, fields) {
 				if (error) {
 					throw error;
 					resolve(false);
 				} else {
 					var words = [];
+					var extractions = [];
 					results.forEach(function(row){
-						words.push([row.search_str, row.replace_str]);
+						if(row.action_type == 1){
+							words.push([row.search_str, row.replace_str]);
+						}
+						if(row.action_type == 2){
+							extractions.push([row.id, row.replace_str, row.search_str]);
+						}
 					})
 					self.replacementWordSet = words; 
+					self.featureExtractionWordSet = extractions;
 					resolve(true);
 				}
 			});	
