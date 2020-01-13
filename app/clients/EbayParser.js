@@ -66,7 +66,7 @@ class EbayParser
 		console.log("Creating Ebay Parser");
 		//set up counters
 		var self = this;
-		self.itemParseQueue = 0;
+		self.itemParseQueue = [];
 		self.itemClassifyQueue = 0;
 
 		self.actionWords = {};
@@ -114,6 +114,7 @@ class EbayParser
 
 	testClassify(items)
 	{
+		console.log("Classify & Writing!!");
 		var testItems = [];
 		var batchData = [];
 		items.forEach(function(item){
@@ -127,11 +128,11 @@ class EbayParser
 			item.brandName = brandSet.join(" ");
 			item.brandScore = brandString.trim();
 			testItems.push(brandString+" >> "+item.title);
-			batchData.push([item.itemId, JSON.stringify(item)]);
+			batchData.push([item.id, JSON.stringify(item)]);
 		})
-		console.log("here!!");
-		// console.log(items);
-		// console.log(testItems);
+		
+		// dd(items);
+		console.log(testItems);
 		this.writeTestJSONData(batchData);
 	}
 
@@ -171,7 +172,10 @@ class EbayParser
 
 			# // generic test
 			# WHERE category_id <= 3
+			AND id IN (863,1125,1770,1816,2262,2992,3263,3310,3343,3452,3999,4131,5218,5473,6067,6720,7681,7788,8753,8975) #// broken aperture values
+			# AND id = 3343
 			# AND id = 122
+			# AND id IN (1207,3064,5220,8753,9064) # // lenses w/ CM
 			# AND id IN (28,29,34,45,63,70,73,101,107,112,118,122,130,139,160,172,177,184,193,196,210,224,225,226) # for/3rd party
 			# AND id IN (67,319,493,825,1026,1311,1722,2229,2931,2998,3791,3949,3999,4293,4802,5218,5354,5423,7265,7321,7873,8166,8243,9185)# series e
 			# AND id IN (23,8160,6336,6088,6001,5721,9888,4704,7773) # bad characters
@@ -180,22 +184,21 @@ class EbayParser
 				if (error) {
 					throw error;
 				} else {
-					self.itemParseQueue += results.length;
+					// self.itemParseQueue += results.length;
 					results.forEach(function(row){
 						// console.log(row.title);
 						var id = row.id;
 						var category = self.ebayCategory[row.category_id]; //todo - can this just be done with stored info?
 						var items = [];
 						self.parseItem(id, row.title, category)
-							.then(item=>{
-									items.push(item);
-									if(self.itemParseQueue <= 0) {
-										process.exit();
-										self.testClassify(items);
-
-									}
+							.then(item => {
+								self.itemParseQueue.push(item);
+								if( self.itemParseQueue.length == results.length) {
+									self.testClassify(self.itemParseQueue.splice(0));	//take the whole queue and reset it
+								}
 							});
-					})
+					});
+					console.log(["xx",self.itemParseQueue,items.length]);
 				}
 			});	
 		}
@@ -244,7 +247,6 @@ class EbayParser
 			.then(item => this.parseBrand(item))
 			.then(item => this.parseFeatureExtraction(item))
 			.then(item => {
-				self.itemParseQueue--;
 				console.log(item);
 				return item;
 			})
@@ -344,12 +346,11 @@ class EbayParser
 		var self = this;
 		return new Promise(function(resolve,reject) {
 			self.replacementWordSet.forEach(function(replacementWords){
-				var regex = new RegExp("(?<!\\S)"+replacementWords[0]+"(?!\\S)","g"); //EX: (?<!\S)series e(?!\S)
+				var regex = new RegExp(replacementWords[0],"g"); //EX: (?<!\S)series e(?!\S)
 				item.workingTitle = item.workingTitle.replace(regex,replacementWords[1]); //replace w/ what is specified
 			})
 			
 			console.log(item.workingTitle);
-			// process.exit();
 			resolve(item);
 		});
 	}
@@ -364,7 +365,16 @@ class EbayParser
 				
 				var feature = item.title.toLowerCase().match(regex); //replace w/ what is specified
 				if(feature != null) {
-					item.features[extractionWords[1]] = feature.map(f => f.replace(" ",""));
+					var featureSet;
+					if(typeof(self.cleanupWordSet[extractionWords[1]]) != "undefined") { //if the extraction feature name has an associated cleanup name
+						var cleanupRegex = new RegExp(self.cleanupWordSet[extractionWords[1]],"gi");
+						// item.features[extractionWords[1]] = feature.map(f => f.replace(cleanupRegex,"")); //delete whatever the regex matches against
+						featureSet = new Set(feature.map(f => f.replace(cleanupRegex,""))); //delete whatever the regex matches against
+					} else {
+						// item.features[extractionWords[1]] = feature.map(f => f.replace(" ",""));
+						featureSet = new Set(feature.map(f => f.replace("asda ","")))
+					}
+					item.features[extractionWords[1]] = Array.from(featureSet);
 				} else {
 					item.features[extractionWords[1]] = [];
 				}
@@ -447,7 +457,7 @@ class EbayParser
 		var self = this;
 		return new Promise(function(resolve,reject) {
 			connection.query(`
-			SELECT id, search_str, replace_str, action_type
+			SELECT id, search_str, replace_str, action_type, padded
 			FROM ebay_word_actions
 			# WHERE action_type = 1
 			`, [],function (error, results, fields) {
@@ -457,16 +467,25 @@ class EbayParser
 				} else {
 					var words = [];
 					var extractions = [];
+					var cleanup = {};
 					results.forEach(function(row){
 						if(row.action_type == 1){
-							words.push([row.search_str, row.replace_str]);
+							if(row.padded == 1) {
+							words.push(["(?<!\\w)"+row.search_str+"(?!\\w)", row.replace_str]); //makes sure search pattern is not part of anotehr word
+							} else {
+								words.push([row.search_str, row.replace_str]);
+							}
 						}
 						if(row.action_type == 2){
 							extractions.push([row.id, row.replace_str, row.search_str]);
 						}
+						if(row.action_type == 3){
+							cleanup[row.replace_str] = row.search_str;
+						}
 					})
 					self.replacementWordSet = words; 
 					self.featureExtractionWordSet = extractions;
+					self.cleanupWordSet = cleanup;
 					resolve(true);
 				}
 			});	
