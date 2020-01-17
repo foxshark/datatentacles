@@ -85,3 +85,68 @@ VALUES
 (45,2)
 ON DUPLICATE KEY
 update type_id = VALUES(type_id);
+
+# get info about lenses in the prototypes
+SELECT 
+count(*) as ct, 
+-- id,
+-- title,
+focal_length, aperture, attributes
+FROM (
+	SELECT  
+	-- *,
+	id,
+	title,
+	feature->>"$.features.focal_length[0]" as focal_length,
+	feature->>"$.features.aperture[0]" as aperture,
+	 replace(replace(replace(feature->>"$.features.lens_attributes","[",""),"]",""),'"','') as attributes
+	FROM ebay_prototypes
+	WHERE category_id = 1
+	AND brand = "nikon"
+	AND JSON_LENGTH(feature->>"$.features.focal_length") != 0
+	AND JSON_LENGTH(feature->>"$.features.aperture") != 0
+) as S
+GROUP BY focal_length, aperture, attributes
+ORDER BY ct DESC
+-- ORDER BY focal_length ASC, aperture ASC
+;
+
+
+# get info on lenses
+SELECT count(*) as ct, focal_length, aperture, attributes
+FROM (
+	SELECT  
+	-- *,
+	id,
+	title,
+	feature->>"$.features.focal_length[0]" as focal_length,
+	feature->>"$.features.aperture[0]" as aperture,
+	replace(replace(replace(feature->>"$.features.lens_attributes","[",""),"]",""),'"','') as attributes
+	-- feature
+	FROM ebay_test
+	WHERE category_id = 1
+	AND feature->>"$.brandName" = "nikon"
+	AND JSON_LENGTH(feature->>"$.features.focal_length") != 0
+	AND JSON_LENGTH(feature->>"$.features.aperture") != 0
+) as S
+GROUP BY focal_length, aperture, attributes
+ORDER BY ct DESC
+;
+
+
+# build prototype OBJECT
+SELECT  
+id,
+title,
+category,
+feature->>"$.brandName" as brandName,
+feature->>"$.features.focal_length[0]" as focal_length,
+feature->>"$.features.aperture[0]" as aperture,
+feature->>"$.features.lens_attributes" as attributes
+FROM ebay_prototypes
+WHERE category_id = 1
+AND brand = "nikon"
+AND JSON_LENGTH(feature->>"$.features.focal_length") != 0
+AND JSON_LENGTH(feature->>"$.features.aperture") != 0
+ORDER BY focal_length ASC, aperture ASC
+;

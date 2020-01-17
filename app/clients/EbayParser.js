@@ -1,13 +1,12 @@
 //SETTINGS
-
 const md5 = require('md5');
-const Parser = require('rss-parser');
 const Accounting = require('accounting');
 const console = require('better-console');
 const cheerio = require('cheerio');
 const mysql      = require('mysql');
 const config = require('config');
 const connection = mysql.createConnection(config.get('dbConfig'));
+const Parser = require('rss-parser');
 const parserData = 
 {
 	customFields: {
@@ -68,10 +67,39 @@ class EbayParser
 		var self = this;
 		self.itemParseQueue = [];
 		self.itemClassifyQueue = 0;
-
+		/*
+		dd(JSON.stringify({
+			name:"Lenses",
+			leaf: false,
+			branch: {
+				name:"focal_length",
+				leaf: false,
+				branch:{
+					name:"aperture",
+					leaf: false,
+					branch:{
+						name:"lens_attributes",
+						leaf:false,
+						branch:{
+							name:"version",
+							leaf: true,
+							branch: {}
+						}
+					}
+				}
+			}
+		}));
+		*/
 		self.actionWords = {};
 		self.getActionWords()
-		.then(next => self.getTestItems());
+		.then(next => self.getCategoryDecisionTrees())
+		.then(next => self.getPrototypeTree())
+		.then(prototypeTree => {
+			
+			self.prototypeTree = prototypeTree;
+			self.getTestItems();	
+			// self.getPrototypes();
+		}); 
 	}	
 
 	getActionWords()
@@ -112,8 +140,9 @@ class EbayParser
 		});
 	}
 
-	testClassify(items)
+	testClassify(items, prototype = false)
 	{
+		var self = this;
 		console.log("Classify & Writing!!");
 		var testItems = [];
 		var batchData = [];
@@ -127,25 +156,113 @@ class EbayParser
 			}
 			item.brandName = brandSet.join(" ");
 			item.brandScore = brandString.trim();
+			var classification = self.buildItemBranches(self.classificationTrees[item.category], item, self.prototypeTree[item.brandName].Lenses);
+			item.dtClassification = self.decisionTreeClassify(classification,self.prototypeTree[item.brandName].Lenses);
 			testItems.push(brandString+" >> "+item.title);
 			batchData.push([item.id, JSON.stringify(item)]);
+			// item.classification = self.decisionTreeClassify(item);
+			// dd([item.workingTitle, item.title, item.features]);
 		})
-		
-		// dd(items);
 		console.log(testItems);
-		this.writeTestJSONData(batchData);
+		// self.buildWordOccuranceMap(testItems); //inspect commonly occouring words
+		this.writeTestJSONData(batchData, prototype);
 	}
 
-	writeTestJSONData(rows)
+	decisionTreeClassify(classification,prototypeTree)
 	{
-		connection.query(`
-		INSERT INTO ebay_test
+		var self = this;
+		var currentStep = classification.part.shift();
+		var best = currentStep.decider.best;
+		var stepData = currentStep.decider.data;
+		// if(tybest)
+		var hasMatch = self.evaluateBranch(best, prototypeTree);
+		if(!classification.part.leaf > 0 && hasMatch) { //goes down a step!
+			dd(prototypeTree['18-55mm']['3.5-5.6']);
+			self.decisionTreeClassify(classification, prototypeTree[best]);
+		} else {
+			// dd(prototypeTree);
+			dd([best, classification.part.decider, classification.part.length , hasMatch]);
+		}
+
+
+		dd(self.prototypeTree[item.brandName]);
+		// evaluateBranch(classification, self.prototypeTree[item.brandName]);
+
+		console.log(classification.part);
+		// dd([self.prototypeTree, item, classification, classification.part[0]]);
+		
+
+
+		return {
+			bestPrototype: 1,
+			allPrototypes: [1,2,3]
+		}
+	}
+
+	evaluateBranch(evaluatedFeature, prototypeTree)
+	{
+		// var self = this;
+		if(typeof(prototypeTree) == "object") {
+			var treeKeys = new Set(Object.keys(prototypeTree));
+			if(treeKeys.has(evaluatedFeature)) { //if the prototypeTree has the value that the item has
+				return true;
+			}
+		} else {
+			return false;
+		}
+
+		return false;
+		//does it exist?
+		// if(typeof(prototypeTree[evaluatedFeature] != "undefined"))
+		// dd([classification.branch,prototypeTree,evaluatedFeature]);//.Lenses['10-20mm']
+		// dd([, classification,"x"]);
+		//classification.branch
+	}
+
+	buildItemBranches(tree,item,prototypeTree)
+	{
+		var self = this;
+		var classification = {};
+		var decider = {
+			"name": tree.branch.name, 
+			"data": item.features[tree.branch.name]
+		};
+		if(typeof(item.features[tree.branch.name]) != "undefined") {
+			decider.best = item.features[tree.branch.name][0];
+		} else {
+			decider.best = false;
+		}
+
+		// dd(decider);
+		if(!tree.leaf) {
+			// console.log(tree[tree.name]);
+			classification = self.buildItemBranches(tree.branch, item, prototypeTree);
+			classification.path.unshift(tree.name);
+			classification.part.unshift({"name":tree.branch.name,"leaf":tree.branch.leaf,"data":item.features[tree.branch.name], "decider":decider});
+		} else {
+			classification.deepestBranch = tree.name;
+			classification.path = [tree.name];
+			classification.part = [];
+
+		}	
+		return classification;
+	}
+
+	writeTestJSONData(rows, prototype = fasle)
+	{
+		var target_table = 'ebay_test';
+		if(prototype) {
+			target_table = 'ebay_prototypes';
+		} 
+
+		var queryString = 'INSERT INTO '+target_table+` 
 		(id, feature)
 		VALUES
 		?
 		ON DUPLICATE KEY 
 		UPDATE feature = VALUES(feature)
-		`, [rows], function (error) {
+		`;
+		connection.query(queryString, [rows], function (error) {
 			if (error) {
 				throw error;
 			} else {
@@ -154,10 +271,43 @@ class EbayParser
 		});	
 	}
 
+	getPrototypes()
+	{
+		var self = this;
+		var items = [];
+		connection.query(`
+		SELECT id, concat(brand, " ", title) as title, category_id
+		FROM ebay_prototypes
+		WHERE category_id = 1
+		AND brand = 'nikon'
+		# AND id IN (503,498,499,501,502)
+		# LIMIT 100
+		`, [],function (error, results, fields) {
+			if (error) {
+				throw error;
+			} else {
+				// self.itemParseQueue += results.length;
+				results.forEach(function(row){
+					// console.log(row.title);
+					var id = row.id;
+					var category = self.ebayCategory[row.category_id]; //todo - can this just be done with stored info?
+					var items = [];
+					self.parseItem(id, row.title, category)
+						.then(item => {
+							self.itemParseQueue.push(item);
+							if( self.itemParseQueue.length == results.length) {
+								self.testClassify(self.itemParseQueue.splice(0), true);	//take the whole queue and reset it
+							}
+						});
+				});
+			}
+		});	
+	}
 
 
 	getTestItems(fake = false)
 	{
+		console.log("Getting Test Items");
 		var self = this;
 		var items = [];
 		if(fake) {
@@ -172,9 +322,9 @@ class EbayParser
 
 			# // generic test
 			# WHERE category_id <= 3
-			AND id IN (863,1125,1770,1816,2262,2992,3263,3310,3343,3452,3999,4131,5218,5473,6067,6720,7681,7788,8753,8975) #// broken aperture values
-			# AND id = 3343
-			# AND id = 122
+			# AND id IN (863,1125,1770,1816,2262,2992,3263,3310,3343,3452,3999,4131,5218,5473,6067,6720,7681,7788,8753,8975) #// broken aperture values
+			#AND id = 3343
+			AND id = 128
 			# AND id IN (1207,3064,5220,8753,9064) # // lenses w/ CM
 			# AND id IN (28,29,34,45,63,70,73,101,107,112,118,122,130,139,160,172,177,184,193,196,210,224,225,226) # for/3rd party
 			# AND id IN (67,319,493,825,1026,1311,1722,2229,2931,2998,3791,3949,3999,4293,4802,5218,5354,5423,7265,7321,7873,8166,8243,9185)# series e
@@ -184,9 +334,11 @@ class EbayParser
 				if (error) {
 					throw error;
 				} else {
-					// self.itemParseQueue += results.length;
+					if(results.length<1) {
+						dd("No results found");
+					}
 					results.forEach(function(row){
-						// console.log(row.title);
+						console.log(row.title);
 						var id = row.id;
 						var category = self.ebayCategory[row.category_id]; //todo - can this just be done with stored info?
 						var items = [];
@@ -198,7 +350,6 @@ class EbayParser
 								}
 							});
 					});
-					console.log(["xx",self.itemParseQueue,items.length]);
 				}
 			});	
 		}
@@ -216,7 +367,7 @@ class EbayParser
 	parseItem(id, title, category)
 	{
 		var self = this;
-		console.log("Parsing: "+title);
+		// console.log("Parsing: "+title);
 
 		/* Steps:
 		 - x general sanatize, trim, and format
@@ -242,12 +393,17 @@ class EbayParser
 		return this.generalSanatize(item)
 			// maybe sanatize it such that you pull off only known-good words?
 			.then(item => this.parseReplaceSpecialWords(item))
+			.then(item => 
+				{
+					console.log(item.workingTitle.toLowerCase())
+					return this.parseFeatureExtraction(item)
+
+				})
 			.then(item => this.parseQuality(item))
 			.then(item => this.parseThirdPartyAndSplit(item))
 			.then(item => this.parseBrand(item))
-			.then(item => this.parseFeatureExtraction(item))
 			.then(item => {
-				console.log(item);
+				// console.log(item);
 				return item;
 			})
 			;
@@ -349,8 +505,7 @@ class EbayParser
 				var regex = new RegExp(replacementWords[0],"g"); //EX: (?<!\S)series e(?!\S)
 				item.workingTitle = item.workingTitle.replace(regex,replacementWords[1]); //replace w/ what is specified
 			})
-			
-			console.log(item.workingTitle);
+
 			resolve(item);
 		});
 	}
@@ -360,10 +515,12 @@ class EbayParser
 		item.features = {};
 		var self = this;
 		return new Promise(function(resolve,reject) {
+			// dd(self.featureExtractionWordSet);
 			self.featureExtractionWordSet.forEach(function(extractionWords){
-				var regex = new RegExp("(?<!\\w)"+extractionWords[2]+"(?!\\w)","gi"); //EX: (?<!\S)series e(?!\S)
-				
-				var feature = item.title.toLowerCase().match(regex); //replace w/ what is specified
+				// var regex = new RegExp("(?<!\\w)"+extractionWords[2]+"(?!\\w)","gi"); //EX: (?<!\S)series e(?!\S)
+				var regex = new RegExp(extractionWords[2],"gi"); //EX: (?<!\S)series e(?!\S)
+				//var feature = item.title.toLowerCase().match(regex); //replace w/ what is specified
+				var feature = item.workingTitle.toLowerCase().match(regex); //replace w/ what is specified
 				if(feature != null) {
 					var featureSet;
 					if(typeof(self.cleanupWordSet[extractionWords[1]]) != "undefined") { //if the extraction feature name has an associated cleanup name
@@ -372,9 +529,10 @@ class EbayParser
 						featureSet = new Set(feature.map(f => f.replace(cleanupRegex,""))); //delete whatever the regex matches against
 					} else {
 						// item.features[extractionWords[1]] = feature.map(f => f.replace(" ",""));
-						featureSet = new Set(feature.map(f => f.replace("asda ","")))
+						featureSet = new Set(feature);
 					}
-					item.features[extractionWords[1]] = Array.from(featureSet);
+					featureSet.delete('');
+					item.features[extractionWords[1]] = Array.from(featureSet).sort();
 				} else {
 					item.features[extractionWords[1]] = [];
 				}
@@ -382,7 +540,7 @@ class EbayParser
 			})
 			
 			// console.log(item.featureTitle);
-			// process.exit();
+			 // process.exit();
 			resolve(item);
 		});
 	}
@@ -469,12 +627,13 @@ class EbayParser
 					var extractions = [];
 					var cleanup = {};
 					results.forEach(function(row){
+						//account for pattern boundaries
+						if(row.padded == 1) {
+							row.search_str = "(?<!\\w)"+row.search_str+"(?!\\w)"; //makes sure search pattern is not part of anotehr word
+						}
+						// what kind of action
 						if(row.action_type == 1){
-							if(row.padded == 1) {
-							words.push(["(?<!\\w)"+row.search_str+"(?!\\w)", row.replace_str]); //makes sure search pattern is not part of anotehr word
-							} else {
-								words.push([row.search_str, row.replace_str]);
-							}
+							words.push([row.search_str, row.replace_str]);
 						}
 						if(row.action_type == 2){
 							extractions.push([row.id, row.replace_str, row.search_str]);
@@ -487,6 +646,79 @@ class EbayParser
 					self.featureExtractionWordSet = extractions;
 					self.cleanupWordSet = cleanup;
 					resolve(true);
+				}
+			});	
+		});
+	}
+
+	getCategoryDecisionTrees()
+	{
+		var self = this;
+		return new Promise(function(resolve,reject) {
+			connection.query(`
+			SELECT name, decision_tree
+			FROM ebay_categories
+			WHERE decision_tree IS NOT NULL
+			;`, [],function (error, results, fields) {
+				if (error) {
+					throw error;
+					resolve(false);
+				} else {
+					self.classificationTrees = {}
+					results.forEach(function(row){
+						self.classificationTrees[row.name] = JSON.parse(row.decision_tree);
+					})
+					resolve(true);
+				}
+			});	
+		});
+	}
+
+	getPrototypeTree()
+	{
+		var self = this;
+		return new Promise(function(resolve,reject) {
+			connection.query(`
+			# build prototype OBJECT
+			SELECT  
+			id,
+			-- title,
+			category,
+			feature->>"$.brandName" as brand_name,
+			feature->>"$.features.focal_length[0]" as focal_length,
+			feature->>"$.features.aperture[0]" as aperture,
+			feature->>"$.features.lens_attributes" as attributes
+			FROM ebay_prototypes
+			-- WHERE category_id = 1
+			WHERE JSON_LENGTH(feature->>"$.features.focal_length") != 0
+			AND JSON_LENGTH(feature->>"$.features.aperture") != 0
+			AND brand = "nikon"
+			ORDER BY focal_length ASC, aperture ASC
+			;`, [],function (error, results, fields) {
+				if (error) {
+					throw error;
+					resolve(false);
+				} else {
+					var t = {};
+					results.forEach(function(row){
+						// build the tree: brand>category>FL>aperture>attributes
+						if(typeof(t[row.brand_name]) == "undefined"){
+							t[row.brand_name] = {};
+						}
+						if(typeof(t[row.brand_name][row.category]) == "undefined"){
+							t[row.brand_name][row.category] = {};
+						}
+						if(typeof(t[row.brand_name][row.category][row.focal_length]) == "undefined"){
+							t[row.brand_name][row.category][row.focal_length] = {};
+						}
+						if(typeof(t[row.brand_name][row.category][row.focal_length][row.aperture]) == "undefined"){
+							t[row.brand_name][row.category][row.focal_length][row.aperture] = {};
+						}
+						if(typeof(t[row.brand_name][row.category][row.focal_length][row.aperture][row.attributes]) == "undefined"){
+							t[row.brand_name][row.category][row.focal_length][row.aperture].attributes = JSON.parse(row.attributes);
+						}
+					});
+					resolve(t);
 				}
 			});	
 		});
@@ -525,6 +757,24 @@ class EbayParser
 		});	
 	}
 
+	buildWordOccuranceMap(strings)
+	{
+		var wordSet = new Set();
+		var wordMap = {};
+		strings.forEach(function(string){
+			string.split(" ").forEach(function(string){
+				if(wordSet.has(string)){
+					wordMap[string]++;
+				} else {
+					wordMap[string] = 1;
+					wordSet.add(string);
+				}
+			})
+		})
+
+		// dd(wordMap);
+	}
+
 	storeWordSet(words)
 	{
 		connection.query(`
@@ -552,8 +802,8 @@ class EbayParser
 		(feed_id, uid, json_data)
 		VALUES
 		?
-		ON DUPLICATE KEY 
-		UPDATE json_data = VALUES(json_data)
+			ON DUPLICATE KEY 
+			UPDATE json_data = VALUES(json_data)
 
 		`, [posts], function (error) {
 			if (error) {
