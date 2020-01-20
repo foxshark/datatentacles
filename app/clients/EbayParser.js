@@ -6,6 +6,7 @@ const cheerio = require('cheerio');
 const mysql      = require('mysql');
 const config = require('config');
 const connection = mysql.createConnection(config.get('dbConfig'));
+connection.connect();
 const Parser = require('rss-parser');
 const parserData = 
 {
@@ -21,7 +22,6 @@ const parserData =
 	}
 };
 const parser = new Parser(parserData); //todo //config.get('ebayRss')
-
 const CLIENT_EBAY = 3;
 const FEED_TYPE_ACTIVE = 1;
 const FEED_TYPE_SOLD = 2;
@@ -56,12 +56,12 @@ const dd = function(x)
 // // completed, sold & un-sold
 // const RSS_GENERIC_SOLD = 'https://www.ebay.com/sch/i.html?_from=R40&_nkw=%28nikon%2C+canon%2C+sony%2C+fuji%2C+leica%2C+olympus%2C+panisonic%2C+mamiya%2C+pentax%2C+rolleiflex%2C+zeiss%2C+hasselblad%29&_sacat=625&LH_PrefLoc=1&LH_Complete=1&_rss=1';
  
-connection.connect();
 
 class EbayParser
 {
 	constructor()
 	{
+
 		console.log("Creating Ebay Parser");
 		//set up counters
 		var self = this;
@@ -97,6 +97,7 @@ class EbayParser
 		.then(prototypeTree => {
 			
 			self.prototypeTree = prototypeTree;
+			// console.log(prototypeTree.nikon.Lenses["300mm"]["4.5"]);
 			self.getTestItems();	
 			// self.getPrototypes();
 		}); 
@@ -156,27 +157,92 @@ class EbayParser
 			}
 			item.brandName = brandSet.join(" ");
 			item.brandScore = brandString.trim();
-			var classification = self.buildItemBranches(self.classificationTrees[item.category], item, self.prototypeTree[item.brandName].Lenses);
-			item.dtClassification = self.decisionTreeClassify(classification,self.prototypeTree[item.brandName].Lenses);
-			testItems.push(brandString+" >> "+item.title);
-			batchData.push([item.id, JSON.stringify(item)]);
-			// item.classification = self.decisionTreeClassify(item);
-			// dd([item.workingTitle, item.title, item.features]);
+
+			// dd(item);
+			if(prototype) {
+				// testItems.push(brandString+" >> "+item.title);
+				batchData.push([item.id, JSON.stringify(item)]);
+				// item.classification = self.decisionTreeClassify(item);
+				// dd([item.workingTitle, item.title, item.features]);
+			} else {
+				var classification = self.buildItemBranches(self.classificationTrees[item.category], item, self.prototypeTree[item.brandName].Lenses);
+				self.decisionTreeClassify(item,classification,self.prototypeTree[item.brandName].Lenses);
+			}
 		})
-		console.log(testItems);
+		// console.log(testItems);
 		// self.buildWordOccuranceMap(testItems); //inspect commonly occouring words
-		this.writeTestJSONData(batchData, prototype);
+		if(prototype) {
+			this.writeTestJSONData(batchData, prototype);
+		}
 	}
 
-	decisionTreeClassify(classification,prototypeTree)
+	decisionTreeClassify(item,classification,prototypeTree)
 	{
 		var self = this;
+		// var part = classification.part.shift();
+		// var bestGuess = part.decider.best;
+		var features = [];
+		classification.part.forEach(function(part) {
+			// console.log("Step "+part.name) //+": "+part.decider.best);	
+			if(part.data.length >0 ) {
+				features.push({"attribute" : part.name, "value" : part.decider.best});
+			}
+		})
+
+
+		// dd(item,features);
+		
+		self.fetchClassifyFromFeatures(features)
+			.then(classifiedId => {
+				var dtClassify = {"best":null};
+				
+				if(classifiedId.length > 1) { // reduce multilabel parts
+					classifiedId = self.reduceMultiLabelMatches(classifiedId, features);
+				}
+
+				dtClassify.all = classifiedId;
+				if(classifiedId.length == 0) dtClassify.status = "failed";
+				if(classifiedId.length == 1) {
+					dtClassify.status = "single";
+					dtClassify.best = classifiedId.pop();
+				}
+				if(classifiedId.length > 1) dtClassify.status = "multi";
+				item.dtClassify = dtClassify;
+				// dd([item,features,item.features.lens_attributes,dtClassify]);
+				console.log("Writing item: "+item.id+" "+item.title);
+				self.writeTestJSONData([[item.id, JSON.stringify(item)]], false)
+			});
+		
+		//item.dtClassification = 
+		//writeTestJSONData(rows, prototype = fasle)
+
+		/*
+		if(part.data.length > 0) {
+			//can go further
+		} else {
+			console.log("end of item tree");
+			dd(classification);
+		}
+		if(typeof(prototypeTree[bestGuess]) != "undefined") { //the text exists in the current branch
+			if(classification.part.length>0) {
+				this.decisionTreeClassify(classification,prototypeTree[bestGuess]);
+			} else {
+				
+				dd([part,part.decider.best]);
+			}
+		} else {
+			dd([part,part.decider.best,prototypeTree]);
+		}
+		*/
+
+		/*
 		var currentStep = classification.part.shift();
 		var best = currentStep.decider.best;
 		var stepData = currentStep.decider.data;
 		// if(tybest)
 		var hasMatch = self.evaluateBranch(best, prototypeTree);
 		if(!classification.part.leaf > 0 && hasMatch) { //goes down a step!
+			dd(classification);
 			dd(prototypeTree['18-55mm']['3.5-5.6']);
 			self.decisionTreeClassify(classification, prototypeTree[best]);
 		} else {
@@ -192,11 +258,39 @@ class EbayParser
 		// dd([self.prototypeTree, item, classification, classification.part[0]]);
 		
 
+		*/
 
-		return {
-			bestPrototype: 1,
-			allPrototypes: [1,2,3]
-		}
+		
+	}
+
+	reduceMultiLabelMatches(classifiedId, features)
+	{
+		var multiDeciderOptions = []
+
+		classifiedId.forEach(function(pItem){ //prototype item
+			features.forEach(function(cItemFeature){  //classifying item feature
+				var itemAttr = JSON.parse(pItem[cItemFeature.attribute]); //get the value from the returend prototypes 
+				if(itemAttr.length > 1) {
+					var overlap = itemAttr.filter(value => cItemFeature.value.includes(value));
+					multiDeciderOptions.push({"id":pItem.id, "values":overlap});
+				}
+			});
+		});
+		
+		var multiResult = [];
+		var multiResultLength = 0;
+		multiDeciderOptions.forEach(function(mOpt){
+			if(mOpt.values.length > multiResultLength) {
+				multiResult = []; //reset array
+			}
+
+			if(mOpt.values.length >= multiResultLength) {
+				multiResult.push({"id":mOpt.id});
+			}
+		});
+
+		classifiedId = multiResult;
+		return classifiedId;
 	}
 
 	evaluateBranch(evaluatedFeature, prototypeTree)
@@ -227,8 +321,13 @@ class EbayParser
 			"name": tree.branch.name, 
 			"data": item.features[tree.branch.name]
 		};
+
 		if(typeof(item.features[tree.branch.name]) != "undefined") {
-			decider.best = item.features[tree.branch.name][0];
+			if(tree.branch.multilabel == false) {
+				decider.best = item.features[tree.branch.name][0];
+			} else {
+				decider.best = item.features[tree.branch.name];
+			}
 		} else {
 			decider.best = false;
 		}
@@ -248,8 +347,9 @@ class EbayParser
 		return classification;
 	}
 
-	writeTestJSONData(rows, prototype = fasle)
+	writeTestJSONData(rows, prototype = false)
 	{
+		// dd(rows);
 		var target_table = 'ebay_test';
 		if(prototype) {
 			target_table = 'ebay_prototypes';
@@ -280,6 +380,7 @@ class EbayParser
 		FROM ebay_prototypes
 		WHERE category_id = 1
 		AND brand = 'nikon'
+		# AND id IN (785, 786)
 		# AND id IN (503,498,499,501,502)
 		# LIMIT 100
 		`, [],function (error, results, fields) {
@@ -318,13 +419,15 @@ class EbayParser
 			FROM ebay_test
 			# // nikon lens test
 			WHERE category_id = 1
-			and feature->>"$.brandName" = "nikon"
-
+			#and feature->>"$.brandName" = "nikon"
+			# AND id IN(23154,23156,23158)
+			# AND id IN (149,169,385,396,449,452,465,811,829,836,849,887,905,990,1048,1217,1245,1577,1593,1701,1847,1910,1927,2117,2218,2256,2364,2397,2507,2545,2564,2812,2833,2841,2862,2999,3221,3610,3673,3954,4298,4378,4597,4699,4742,4780,4938,5009,5050,5124,5256,5365,5456,5542,5656,5705,5770,5848,5872,5924,5953,6051,6160,6163,6236,6363,6367,6372,6401,6451,6503,6529,6850,6869,6903,6914,6932,6939,6962,6990,6995,7044,7102,7147,7232,7308,7392,7406,7417,7802,7881,7948,8001,8257,8297,8306,8323,8360,8377,8401,8455,8546,8547,8682,8735,8769,8913,9088,9117,9165,9167,9169,9199,9225,9528,9566,9693,9741,9986,22766,22810,22839,22872,22929,22956,22988,23027,23059,23086,23114,23124,23142,23166,23172,23196,23212,23265,23290,23307,23334,23382,23388) # messed up nikon brand names
+			# AND id IN(718,856,1018,1182,1455,2055,2166,2253,2454,2631,3196,3304,3414,4534,4614,5562,5564,6041,6224,6398,6436,7785,7926,9127,9347,9373,22994,23023,23127,23157) # // double classified 50/1.4 D & G //bad ones: 403,
 			# // generic test
 			# WHERE category_id <= 3
 			# AND id IN (863,1125,1770,1816,2262,2992,3263,3310,3343,3452,3999,4131,5218,5473,6067,6720,7681,7788,8753,8975) #// broken aperture values
 			#AND id = 3343
-			AND id = 128
+			#AND id = 128
 			# AND id IN (1207,3064,5220,8753,9064) # // lenses w/ CM
 			# AND id IN (28,29,34,45,63,70,73,101,107,112,118,122,130,139,160,172,177,184,193,196,210,224,225,226) # for/3rd party
 			# AND id IN (67,319,493,825,1026,1311,1722,2229,2931,2998,3791,3949,3999,4293,4802,5218,5354,5423,7265,7321,7873,8166,8243,9185)# series e
@@ -599,7 +702,6 @@ class EbayParser
 					}
 				})
 			}
-			//self.actionWords.brand[]
 			resolve(item);
 		});
 	}
@@ -712,11 +814,12 @@ class EbayParser
 							t[row.brand_name][row.category][row.focal_length] = {};
 						}
 						if(typeof(t[row.brand_name][row.category][row.focal_length][row.aperture]) == "undefined"){
-							t[row.brand_name][row.category][row.focal_length][row.aperture] = {};
+							t[row.brand_name][row.category][row.focal_length][row.aperture] = []; //{};
 						}
-						if(typeof(t[row.brand_name][row.category][row.focal_length][row.aperture][row.attributes]) == "undefined"){
-							t[row.brand_name][row.category][row.focal_length][row.aperture].attributes = JSON.parse(row.attributes);
-						}
+						// if(typeof(t[row.brand_name][row.category][row.focal_length][row.aperture][row.attributes]) == "undefined"){
+						// 	t[row.brand_name][row.category][row.focal_length][row.aperture].attributes = [];
+						// }
+						t[row.brand_name][row.category][row.focal_length][row.aperture].push({"id":row.id, "attributes":JSON.parse(row.attributes)});
 					});
 					resolve(t);
 				}
@@ -818,6 +921,74 @@ class EbayParser
 			
 		});	
 	}
+
+	fetchClassifyFromFeatures(features)
+	{
+		return new Promise(function(resolve,reject) {
+			var query = 'SELECT id ';
+			features.forEach(function(feature){
+				// feature->>"$.features.aperture[0]" = "2.8"
+				// if(typeof(feature.value)=="object") {
+					query += ` , feature->>"$.features.`+feature.attribute+`" as `+feature.attribute;
+				// }
+			})
+
+			query += ' FROM ebay_prototypes WHERE id IS NOT NULL ';
+
+			features.forEach(function(feature){
+				// feature->>"$.features.aperture[0]" = "2.8"
+				if(typeof(feature.value)=="object") {
+					query += ' AND JSON_OVERLAPS( feature->>"$.features.'+feature.attribute+`", '`+JSON.stringify(feature.value)+`') `;
+				} else {
+					query += ' AND feature->>"$.features.'+feature.attribute+'[0]" = "'+feature.value+'" ';
+				}
+			})
+
+			// dd([features, query]);
+
+			connection.query(query, [],function (error, results, fields) {
+				if (error) {
+					throw error;
+					reject();
+				} else {
+					if(results.length == 0) {
+						dd([features, query]);
+					}
+					resolve(results);
+					/*
+					var idSet = [];
+					results.forEach(function(row){
+						idSet.push(row.id);
+					})
+					resolve(idSet);
+					*/
+					/*
+					if(results.length == 1) {
+						resolve( results.pop().id );
+					} else {
+						if(results.length == 0) {
+							resolve( "falied" );
+						} else {
+							resolve( "multi: "+results.length );
+						}
+					} */
+				}
+			});
+		});
+
+
+		/*
+		SELECT  
+		-- feature->>"$.numBrands" as NumBrands,
+		id, title
+		-- ,feature->>"$.features.aperture"
+		FROM ebay_prototypes
+		WHERE feature->>"$.features.aperture[0]" = "2.8"
+		;
+		*/
+	}
+
+
 }
 
 module.exports = EbayParser;

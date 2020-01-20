@@ -172,7 +172,7 @@ var feedPrototypes = [];
 
 		setInterval(function(){
 			walkFeeds();
-		}, 1100); 
+		}, 2100); 
 		// console.log(feedWalkQueue);
 	}
 
@@ -180,6 +180,7 @@ var feedPrototypes = [];
 	function walkFeeds()
 	{
 		var walkSettings = feedWalkQueue.shift();
+		console.log("Walk steps remaining: "+feedWalkQueue.length);
 		// console.log(walkSettings[0], walkSettings[1], feedPrototypes[walkSettings[0]]);
 		fetchFeed(feedPrototypes[walkSettings[0]], walkSettings[1]);
 
@@ -226,7 +227,9 @@ var feedPrototypes = [];
 					}
 					posts.push(allItems[postHash]);
 				});
-				storeRawSpiderPostBulk(posts);
+				if(posts.length > 0){
+					storeRawSpiderPostBulk(posts);
+				}
 				console.log("Fetched "+posts.length+" posts from eBay feed URL: "+fetchURL);
 				console.log("Total gathered item count: "+allItemSet.size);
 			}
@@ -259,8 +262,73 @@ var feedPrototypes = [];
 		});	
 	}
 
+	function parseBelongData(l = 10)
+	{
+		connection.query(`
+		SELECT id, belongs_to
+		FROM ebay_spider_items
+		WHERE belongs_json IS NULL
+		LIMIT ?
+		# ON DUPLICATE KEY 
+		# UPDATE json_data = VALUES(json_data),
+		# UPDATE belongs_to = VALUES(belongs_to)
 
-    breakUpSideNav(baseLenses);
-    
+		`, l, function (error, results, fields) {
+			if (error) {
+				throw error;
+			} else {
+				var items = [];
+				results.forEach(function(result){
+					var tree = {};
+					JSON.parse(result.belongs_to).forEach(function(mapping){
+						//category | attribute | value
+						tree = attributeSet(mapping, tree);
+					})
+					items.push([result.id, JSON.stringify(tree)]);
+				});
+				if(items.length > 0) {
+					updateBelongJson(items);
+				}
+			}
+		});	
+	}
+
+	function updateBelongJson(items)
+	{
+		// console.log(items);
+		connection.query(`
+		INSERT INTO ebay_spider_items
+		(id, belongs_json)
+		VALUES
+		?
+		ON DUPLICATE KEY 
+		UPDATE belongs_json = VALUES(belongs_json)
+
+		`, [items], function (error) {
+			if (error) {
+				throw error;
+			} else {
+				console.log("Updated "+items.length+" posts");
+				parseBelongData(1000);
+			}
+			
+		});	
+	}
+
+	function attributeSet(a, tree)
+	{
+		if(typeof(tree[a[0]]) == "undefined"){
+			tree[a[0]] = {};
+		} 
+		if(typeof(tree[a[0]][a[1]]) == "undefined"){
+			tree[a[0]][a[1]] = [];
+		} 
+		tree[a[0]][a[1]].push(a[2]);
+		return tree;
+	}
+
+
+    // breakUpSideNav(baseLenses);
+    parseBelongData(100);
 
 
