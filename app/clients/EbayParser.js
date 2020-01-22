@@ -59,7 +59,7 @@ const dd = function(x)
 
 class EbayParser
 {
-	constructor()
+	constructor(observeItemID = 0)
 	{
 
 		console.log("Creating Ebay Parser");
@@ -98,7 +98,17 @@ class EbayParser
 			
 			self.prototypeTree = prototypeTree;
 			// console.log(prototypeTree.nikon.Lenses["300mm"]["4.5"]);
-			self.getTestItems();	
+			
+			if(observeItemID > 0) {
+				console.log("Looking for item ID #"+observeItemID);
+				console.log(prototypeTree);
+				self.testMode = true;
+				self.getTestItems(observeItemID);	
+			} else {
+				self.testMode = false;
+				self.getTestItems();	
+			}
+			
 			// self.getPrototypes();
 		}); 
 	}	
@@ -147,6 +157,7 @@ class EbayParser
 		console.log("Classify & Writing!!");
 		var testItems = [];
 		var batchData = [];
+
 		items.forEach(function(item){
 			item.numBrands = Object.keys(item.brand).length;
 			var brandSet = [];
@@ -165,6 +176,9 @@ class EbayParser
 				// item.classification = self.decisionTreeClassify(item);
 				// dd([item.workingTitle, item.title, item.features]);
 			} else {
+				if(typeof(self.prototypeTree[item.brandName]) == "undefined") { // just stop and take a timeout, how does it not have a brand??
+					dd([self.prototypeTree[item.brandName], item, item.brandName]);
+				}
 				var classification = self.buildItemBranches(self.classificationTrees[item.category], item, self.prototypeTree[item.brandName].Lenses);
 				self.decisionTreeClassify(item,classification,self.prototypeTree[item.brandName].Lenses);
 			}
@@ -172,6 +186,7 @@ class EbayParser
 		// console.log(testItems);
 		// self.buildWordOccuranceMap(testItems); //inspect commonly occouring words
 		if(prototype) {
+			// dd(batchData);
 			this.writeTestJSONData(batchData, prototype);
 		}
 	}
@@ -195,22 +210,32 @@ class EbayParser
 		self.fetchClassifyFromFeatures(features)
 			.then(classifiedId => {
 				var dtClassify = {"best":null};
-				
+
 				if(classifiedId.length > 1) { // reduce multilabel parts
 					classifiedId = self.reduceMultiLabelMatches(classifiedId, features);
 				}
-
+				// dd([classifiedId, features]);
 				dtClassify.all = classifiedId;
-				if(classifiedId.length == 0) dtClassify.status = "failed";
+				if(classifiedId.length == 0) {
+					if(features.length > 0) {
+						dtClassify.status = "junk";
+						dtClassify.junk = features;
+					} else {
+						dtClassify.status = "failed";
+					}
+				}
 				if(classifiedId.length == 1) {
 					dtClassify.status = "single";
 					dtClassify.best = classifiedId.pop();
 				}
 				if(classifiedId.length > 1) dtClassify.status = "multi";
 				item.dtClassify = dtClassify;
-				// dd([item,features,item.features.lens_attributes,dtClassify]);
 				console.log("Writing item: "+item.id+" "+item.title);
 				self.writeTestJSONData([[item.id, JSON.stringify(item)]], false)
+				if(self.testMode) {
+					console.log("Classification Results: ");
+					dd([item,features,item.features.lens_attributes,dtClassify,dtClassify.junk]);
+				}
 			});
 		
 		//item.dtClassification = 
@@ -233,7 +258,7 @@ class EbayParser
 		} else {
 			dd([part,part.decider.best,prototypeTree]);
 		}
-		*/
+		
 
 		/*
 		var currentStep = classification.part.shift();
@@ -379,7 +404,8 @@ class EbayParser
 		SELECT id, concat(brand, " ", title) as title, category_id
 		FROM ebay_prototypes
 		WHERE category_id = 1
-		AND brand = 'nikon'
+		AND id > 886
+		#AND brand = 'canon'
 		# AND id IN (785, 786)
 		# AND id IN (503,498,499,501,502)
 		# LIMIT 100
@@ -406,20 +432,25 @@ class EbayParser
 	}
 
 
-	getTestItems(fake = false)
+	getTestItems(forcedID = 0)
 	{
 		console.log("Getting Test Items");
 		var self = this;
 		var items = [];
-		if(fake) {
-			self.testParse("Vintage Manual lenses REPAIR SERVICE..TAKUMAR,MINOLTA,NIKON,USSR etc...");
+		var queryString;
+		if(forcedID > 0) {
+			queryString = `
+			SELECT id, title, category_id
+			FROM ebay_test
+			WHERE id = `+forcedID;
 		} else {
-			connection.query(`
+			queryString = `
 			SELECT id, title, category_id
 			FROM ebay_test
 			# // nikon lens test
 			WHERE category_id = 1
-			#and feature->>"$.brandName" = "nikon"
+			and feature->>"$.brandName" = "nikon"
+			# AND id IN (7041)
 			# AND id IN(23154,23156,23158)
 			# AND id IN (149,169,385,396,449,452,465,811,829,836,849,887,905,990,1048,1217,1245,1577,1593,1701,1847,1910,1927,2117,2218,2256,2364,2397,2507,2545,2564,2812,2833,2841,2862,2999,3221,3610,3673,3954,4298,4378,4597,4699,4742,4780,4938,5009,5050,5124,5256,5365,5456,5542,5656,5705,5770,5848,5872,5924,5953,6051,6160,6163,6236,6363,6367,6372,6401,6451,6503,6529,6850,6869,6903,6914,6932,6939,6962,6990,6995,7044,7102,7147,7232,7308,7392,7406,7417,7802,7881,7948,8001,8257,8297,8306,8323,8360,8377,8401,8455,8546,8547,8682,8735,8769,8913,9088,9117,9165,9167,9169,9199,9225,9528,9566,9693,9741,9986,22766,22810,22839,22872,22929,22956,22988,23027,23059,23086,23114,23124,23142,23166,23172,23196,23212,23265,23290,23307,23334,23382,23388) # messed up nikon brand names
 			# AND id IN(718,856,1018,1182,1455,2055,2166,2253,2454,2631,3196,3304,3414,4534,4614,5562,5564,6041,6224,6398,6436,7785,7926,9127,9347,9373,22994,23023,23127,23157) # // double classified 50/1.4 D & G //bad ones: 403,
@@ -433,7 +464,10 @@ class EbayParser
 			# AND id IN (67,319,493,825,1026,1311,1722,2229,2931,2998,3791,3949,3999,4293,4802,5218,5354,5423,7265,7321,7873,8166,8243,9185)# series e
 			# AND id IN (23,8160,6336,6088,6001,5721,9888,4704,7773) # bad characters
 			# LIMIT 100
-			`, [],function (error, results, fields) {
+			`;
+		}
+
+			connection.query(queryString, [],function (error, results, fields) {
 				if (error) {
 					throw error;
 				} else {
@@ -455,7 +489,6 @@ class EbayParser
 					});
 				}
 			});	
-		}
 	}
 
 	parseWorker()
@@ -500,7 +533,6 @@ class EbayParser
 				{
 					console.log(item.workingTitle.toLowerCase())
 					return this.parseFeatureExtraction(item)
-
 				})
 			.then(item => this.parseQuality(item))
 			.then(item => this.parseThirdPartyAndSplit(item))
@@ -606,7 +638,7 @@ class EbayParser
 		return new Promise(function(resolve,reject) {
 			self.replacementWordSet.forEach(function(replacementWords){
 				var regex = new RegExp(replacementWords[0],"g"); //EX: (?<!\S)series e(?!\S)
-				item.workingTitle = item.workingTitle.replace(regex,replacementWords[1]); //replace w/ what is specified
+				item.workingTitle = " "+item.workingTitle.replace(regex,replacementWords[1])+" "; //replace w/ what is specified
 			})
 
 			resolve(item);
@@ -717,7 +749,7 @@ class EbayParser
 		var self = this;
 		return new Promise(function(resolve,reject) {
 			connection.query(`
-			SELECT id, search_str, replace_str, action_type, padded
+			SELECT id, search_str, replace_str, action_type, 0 as padded
 			FROM ebay_word_actions
 			# WHERE action_type = 1
 			`, [],function (error, results, fields) {
@@ -731,7 +763,7 @@ class EbayParser
 					results.forEach(function(row){
 						//account for pattern boundaries
 						if(row.padded == 1) {
-							row.search_str = "(?<!\\w)"+row.search_str+"(?!\\w)"; //makes sure search pattern is not part of anotehr word
+							row.search_str = '\s'+row.search_str+'\s'; //makes sure search pattern is not part of anotehr word
 						}
 						// what kind of action
 						if(row.action_type == 1){
@@ -746,7 +778,8 @@ class EbayParser
 					})
 					self.replacementWordSet = words; 
 					self.featureExtractionWordSet = extractions;
-					self.cleanupWordSet = cleanup;
+					self.cleanupWordSet = cleanup; 
+
 					resolve(true);
 				}
 			});	
@@ -791,10 +824,10 @@ class EbayParser
 			feature->>"$.features.aperture[0]" as aperture,
 			feature->>"$.features.lens_attributes" as attributes
 			FROM ebay_prototypes
-			-- WHERE category_id = 1
 			WHERE JSON_LENGTH(feature->>"$.features.focal_length") != 0
 			AND JSON_LENGTH(feature->>"$.features.aperture") != 0
-			AND brand = "nikon"
+			# AND brand = "nikon"
+			AND category_id = 1
 			ORDER BY focal_length ASC, aperture ASC
 			;`, [],function (error, results, fields) {
 				if (error) {
@@ -951,9 +984,10 @@ class EbayParser
 					throw error;
 					reject();
 				} else {
+					/*
 					if(results.length == 0) {
 						dd([features, query]);
-					}
+					}*/
 					resolve(results);
 					/*
 					var idSet = [];

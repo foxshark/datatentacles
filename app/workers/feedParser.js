@@ -9,4 +9,11 @@ const ebayParser = require('../clients/EbayParser.js');
 
 // var ig = new instagramParser();	
 // var red = new redditClient();
-var eb = new ebayParser();
+
+
+var specialWatchID = 0;
+if(typeof(process.argv[2])!= "undefined") {
+	specialWatchID = process.argv[2];
+}
+
+var eb = new ebayParser(specialWatchID);
