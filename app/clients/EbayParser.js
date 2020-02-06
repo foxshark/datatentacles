@@ -37,6 +37,7 @@ const dd = function(x)
 		console.log("************");
 		process.exit();
 	}
+const SpiderParser = require("../clients/parsers/EbaySpider.js");
 
 
 
@@ -121,6 +122,7 @@ class EbayParser
 			1 :	"Lenses",
 			2 :	"Digital Cameras",
 			3 :	"Film Cameras",
+			999 : "Spider"
 		}
 
 		return new Promise(function(resolve,reject) {
@@ -176,11 +178,17 @@ class EbayParser
 				// item.classification = self.decisionTreeClassify(item);
 				// dd([item.workingTitle, item.title, item.features]);
 			} else {
+				classification = null;
 				if(typeof(self.prototypeTree[item.brandName]) == "undefined") { // just stop and take a timeout, how does it not have a brand??
-					dd([self.prototypeTree[item.brandName], item, item.brandName]);
+					
+					console.log("Brand broken problem");
+					// dd([self.prototypeTree[item.brandName], item, item.brandName]);
+					self.decisionTreeClassify(item)
+
+				} else {
+					var classification = self.buildItemBranches(self.classificationTrees[item.category], item, self.prototypeTree[item.brandName].Lenses);
+					self.decisionTreeClassify(item,classification,self.prototypeTree[item.brandName].Lenses);
 				}
-				var classification = self.buildItemBranches(self.classificationTrees[item.category], item, self.prototypeTree[item.brandName].Lenses);
-				self.decisionTreeClassify(item,classification,self.prototypeTree[item.brandName].Lenses);
 			}
 		})
 		// console.log(testItems);
@@ -191,99 +199,120 @@ class EbayParser
 		}
 	}
 
-	decisionTreeClassify(item,classification,prototypeTree)
+	decisionTreeClassify(item,classification = null ,prototypeTree = [])
 	{
 		var self = this;
-		// var part = classification.part.shift();
-		// var bestGuess = part.decider.best;
-		var features = [];
-		classification.part.forEach(function(part) {
-			// console.log("Step "+part.name) //+": "+part.decider.best);	
-			if(part.data.length >0 ) {
-				features.push({"attribute" : part.name, "value" : part.decider.best});
-			}
-		})
-
-
-		// dd(item,features);
-		
-		self.fetchClassifyFromFeatures(features)
-			.then(classifiedId => {
-				var dtClassify = {"best":null};
-
-				if(classifiedId.length > 1) { // reduce multilabel parts
-					classifiedId = self.reduceMultiLabelMatches(classifiedId, features);
-				}
-				// dd([classifiedId, features]);
-				dtClassify.all = classifiedId;
-				if(classifiedId.length == 0) {
-					if(features.length > 0) {
-						dtClassify.status = "junk";
-						dtClassify.junk = features;
-					} else {
-						dtClassify.status = "failed";
-					}
-				}
-				if(classifiedId.length == 1) {
-					dtClassify.status = "single";
-					dtClassify.best = classifiedId.pop();
-				}
-				if(classifiedId.length > 1) dtClassify.status = "multi";
-				item.dtClassify = dtClassify;
-				console.log("Writing item: "+item.id+" "+item.title);
-				self.writeTestJSONData([[item.id, JSON.stringify(item)]], false)
-				if(self.testMode) {
-					console.log("Classification Results: ");
-					dd([item,features,item.features.lens_attributes,dtClassify,dtClassify.junk]);
+			if(classification !== null) {
+			// var part = classification.part.shift();
+			// var bestGuess = part.decider.best;
+			 
+			var features = []; //{"attribute" : "brandName", "value" : }]; // start off w/ brand
+			classification.part.forEach(function(part) {
+				// console.log("Step "+part.name) //+": "+part.decider.best);	
+				if(part.data.length >0 ) {
+					features.push({"attribute" : part.name, "value" : part.decider.best});
 				}
 			});
-		
-		//item.dtClassification = 
-		//writeTestJSONData(rows, prototype = fasle)
 
-		/*
-		if(part.data.length > 0) {
-			//can go further
-		} else {
-			console.log("end of item tree");
-			dd(classification);
-		}
-		if(typeof(prototypeTree[bestGuess]) != "undefined") { //the text exists in the current branch
-			if(classification.part.length>0) {
-				this.decisionTreeClassify(classification,prototypeTree[bestGuess]);
+
+			// dd([item,features]);
+			
+			self.fetchClassifyFromFeatures(features, item.brandName)
+				.then(classifiedId => {
+					var dtClassify = {"best":null,"origLength":classifiedId.length};
+					if(classifiedId.length > 1) { // reduce multilabel parts
+						dtClassify.junkClassify = classifiedId.map(row =>  Object.assign({}, row));
+						classifiedId = self.reduceMultiLabelMatches(classifiedId, features);
+					}
+					// dd([classifiedId, features]);
+					dtClassify.all = classifiedId;
+					if(classifiedId.length == 0) {
+						if(features.length > 1) {
+							// second chance
+							
+							/*var possiblyUselessFeature = features.pop; // remove last feature to try more generic
+							self.fetchClassifyFromFeatures(features) // not working!!
+							.then(classifiedIdSalvage => {
+								dd("Second!");
+								dd(classifiedIdSalvage);
+								if(classifiedIdSalvage.length == 1) {
+									dtClassify.status = "single";
+									dtClassify.best = classifiedIdSalvage.pop();
+								} else {
+									features.push(possiblyUselessFeature);
+									dtClassify.status = "junk";
+									dtClassify.junk = features;
+								}
+							});*/
+							dtClassify.status = "junk";
+						} else {
+							dtClassify.status = "failed";
+						}
+					}
+					if(classifiedId.length == 1) {
+						dtClassify.status = "single";
+						dtClassify.best = classifiedId.pop();
+					}
+					if(classifiedId.length > 1) dtClassify.status = "multi";
+					item.dtClassify = dtClassify;
+					console.log("Writing item: "+item.id+" "+item.title);
+					self.writeTestJSONData([[item.id, JSON.stringify(item)]], false)
+					if(self.testMode) {
+						console.log("Classification Results: ");
+						dd([{"classLen":classifiedId.length, "featLen":features.length}, item,features,item.features.lens_attributes,dtClassify,dtClassify.junkClassify]);
+					}
+				});
+			
+			//item.dtClassification = 
+			//writeTestJSONData(rows, prototype = fasle)
+
+			/*
+			if(part.data.length > 0) {
+				//can go further
 			} else {
-				
-				dd([part,part.decider.best]);
+				console.log("end of item tree");
+				dd(classification);
 			}
+			if(typeof(prototypeTree[bestGuess]) != "undefined") { //the text exists in the current branch
+				if(classification.part.length>0) {
+					this.decisionTreeClassify(classification,prototypeTree[bestGuess]);
+				} else {
+					
+					dd([part,part.decider.best]);
+				}
+			} else {
+				dd([part,part.decider.best,prototypeTree]);
+			}
+			
+
+			/*
+			var currentStep = classification.part.shift();
+			var best = currentStep.decider.best;
+			var stepData = currentStep.decider.data;
+			// if(tybest)
+			var hasMatch = self.evaluateBranch(best, prototypeTree);
+			if(!classification.part.leaf > 0 && hasMatch) { //goes down a step!
+				dd(classification);
+				dd(prototypeTree['18-55mm']['3.5-5.6']);
+				self.decisionTreeClassify(classification, prototypeTree[best]);
+			} else {
+				// dd(prototypeTree);
+				dd([best, classification.part.decider, classification.part.length , hasMatch]);
+			}
+
+
+			dd(self.prototypeTree[item.brandName]);
+			// evaluateBranch(classification, self.prototypeTree[item.brandName]);
+
+			console.log(classification.part);
+			// dd([self.prototypeTree, item, classification, classification.part[0]]);
+			
+
+			*/
 		} else {
-			dd([part,part.decider.best,prototypeTree]);
+			// dd(item);
+			self.writeTestJSONData([[item.id, JSON.stringify(item)]], false);
 		}
-		
-
-		/*
-		var currentStep = classification.part.shift();
-		var best = currentStep.decider.best;
-		var stepData = currentStep.decider.data;
-		// if(tybest)
-		var hasMatch = self.evaluateBranch(best, prototypeTree);
-		if(!classification.part.leaf > 0 && hasMatch) { //goes down a step!
-			dd(classification);
-			dd(prototypeTree['18-55mm']['3.5-5.6']);
-			self.decisionTreeClassify(classification, prototypeTree[best]);
-		} else {
-			// dd(prototypeTree);
-			dd([best, classification.part.decider, classification.part.length , hasMatch]);
-		}
-
-
-		dd(self.prototypeTree[item.brandName]);
-		// evaluateBranch(classification, self.prototypeTree[item.brandName]);
-
-		console.log(classification.part);
-		// dd([self.prototypeTree, item, classification, classification.part[0]]);
-		
-
-		*/
 
 		
 	}
@@ -340,41 +369,46 @@ class EbayParser
 
 	buildItemBranches(tree,item,prototypeTree)
 	{
-		var self = this;
-		var classification = {};
-		var decider = {
-			"name": tree.branch.name, 
-			"data": item.features[tree.branch.name]
-		};
+		if(typeof(tree) == "undefined") {
+			return null;
+		} else {
+			var self = this;
+			var classification = {};
+			var decider = {
+				"name": tree.branch.name, 
+				"data": item.features[tree.branch.name]
+			};
 
-		if(typeof(item.features[tree.branch.name]) != "undefined") {
-			if(tree.branch.multilabel == false) {
-				decider.best = item.features[tree.branch.name][0];
+			if(typeof(item.features[tree.branch.name]) != "undefined") {
+				if(tree.branch.multilabel == false) {
+					decider.best = item.features[tree.branch.name][0];
+				} else {
+					decider.best = item.features[tree.branch.name];
+				}
 			} else {
-				decider.best = item.features[tree.branch.name];
+				decider.best = false;
 			}
-		} else {
-			decider.best = false;
+
+			// dd(decider);
+			if(!tree.leaf) {
+				// console.log(tree[tree.name]);
+				classification = self.buildItemBranches(tree.branch, item, prototypeTree);
+				classification.path.unshift(tree.name);
+				classification.part.unshift({"name":tree.branch.name,"leaf":tree.branch.leaf,"data":item.features[tree.branch.name], "decider":decider});
+			} else {
+				classification.deepestBranch = tree.name;
+				classification.path = [tree.name];
+				classification.part = [];
+
+			}	
+			return classification;
 		}
-
-		// dd(decider);
-		if(!tree.leaf) {
-			// console.log(tree[tree.name]);
-			classification = self.buildItemBranches(tree.branch, item, prototypeTree);
-			classification.path.unshift(tree.name);
-			classification.part.unshift({"name":tree.branch.name,"leaf":tree.branch.leaf,"data":item.features[tree.branch.name], "decider":decider});
-		} else {
-			classification.deepestBranch = tree.name;
-			classification.path = [tree.name];
-			classification.part = [];
-
-		}	
-		return classification;
 	}
 
 	writeTestJSONData(rows, prototype = false)
 	{
 		// dd(rows);
+		var i = 0;
 		var target_table = 'ebay_test';
 		if(prototype) {
 			target_table = 'ebay_prototypes';
@@ -391,7 +425,7 @@ class EbayParser
 			if (error) {
 				throw error;
 			} else {
-				console.log("updated");
+				console.log("updated "+rows.length+" rows at "+Date.now());
 			}
 		});	
 	}
@@ -448,8 +482,9 @@ class EbayParser
 			SELECT id, title, category_id
 			FROM ebay_test
 			# // nikon lens test
-			WHERE category_id = 1
-			and feature->>"$.brandName" = "nikon"
+			WHERE category_id = 999
+			# and feature->>"$.brandName" = "nikon"
+			# AND id IN (23077,23260,22919,23038,23232,22728,23202,23018,22959,23060,22820,23192,23057,23074,23258,22741,23357,23115,23094,23215,23253,22983,23180,23328,22942,23240,23100,23120,22757,9720,9549,9274,9203,9095,9024,8627,8460,8262,8221,8039,7789,7788,6765,6523,5218,5053,4889,4704,4416,4262) #// titles [with , w/, and]
 			# AND id IN (7041)
 			# AND id IN(23154,23156,23158)
 			# AND id IN (149,169,385,396,449,452,465,811,829,836,849,887,905,990,1048,1217,1245,1577,1593,1701,1847,1910,1927,2117,2218,2256,2364,2397,2507,2545,2564,2812,2833,2841,2862,2999,3221,3610,3673,3954,4298,4378,4597,4699,4742,4780,4938,5009,5050,5124,5256,5365,5456,5542,5656,5705,5770,5848,5872,5924,5953,6051,6160,6163,6236,6363,6367,6372,6401,6451,6503,6529,6850,6869,6903,6914,6932,6939,6962,6990,6995,7044,7102,7147,7232,7308,7392,7406,7417,7802,7881,7948,8001,8257,8297,8306,8323,8360,8377,8401,8455,8546,8547,8682,8735,8769,8913,9088,9117,9165,9167,9169,9199,9225,9528,9566,9693,9741,9986,22766,22810,22839,22872,22929,22956,22988,23027,23059,23086,23114,23124,23142,23166,23172,23196,23212,23265,23290,23307,23334,23382,23388) # messed up nikon brand names
@@ -457,8 +492,6 @@ class EbayParser
 			# // generic test
 			# WHERE category_id <= 3
 			# AND id IN (863,1125,1770,1816,2262,2992,3263,3310,3343,3452,3999,4131,5218,5473,6067,6720,7681,7788,8753,8975) #// broken aperture values
-			#AND id = 3343
-			#AND id = 128
 			# AND id IN (1207,3064,5220,8753,9064) # // lenses w/ CM
 			# AND id IN (28,29,34,45,63,70,73,101,107,112,118,122,130,139,160,172,177,184,193,196,210,224,225,226) # for/3rd party
 			# AND id IN (67,319,493,825,1026,1311,1722,2229,2931,2998,3791,3949,3999,4293,4802,5218,5354,5423,7265,7321,7873,8166,8243,9185)# series e
@@ -474,6 +507,7 @@ class EbayParser
 					if(results.length<1) {
 						dd("No results found");
 					}
+					// dd(results.length);
 					results.forEach(function(row){
 						console.log(row.title);
 						var id = row.id;
@@ -529,14 +563,22 @@ class EbayParser
 		return this.generalSanatize(item)
 			// maybe sanatize it such that you pull off only known-good words?
 			.then(item => this.parseReplaceSpecialWords(item))
-			.then(item => 
-				{
-					console.log(item.workingTitle.toLowerCase())
-					return this.parseFeatureExtraction(item)
-				})
-			.then(item => this.parseQuality(item))
 			.then(item => this.parseThirdPartyAndSplit(item))
 			.then(item => this.parseBrand(item))
+			.then(item => 
+				{
+					if(item.category == "Spider"){
+						var spider = new SpiderParser(item);
+						// return spider.classify();
+						return this.parseFeatureExtraction(spider.classify());
+					} else {
+						console.log(item.workingTitle.toLowerCase())
+						return this.parseFeatureExtraction(item)
+					}
+				})
+			.then(item => this.parseQuality(item))
+			// .then(item => this.parseThirdPartyAndSplit(item))
+			// .then(item => this.parseBrand(item))
 			.then(item => {
 				// console.log(item);
 				return item;
@@ -604,7 +646,20 @@ class EbayParser
 	{
 		var self = this;
 		return new Promise(function(resolve,reject) {
-			
+			var regex = new RegExp(self.splitWordSet[0],"gi"); //assume 1 for now
+			var splitLocation = item.workingTitle.search(regex);
+			item.includedItems = {
+				"workingTitle" : null,
+				"items" : []
+			}
+			if(splitLocation > 0) //ignore if it's at the start
+			{
+				item.includedItems.workingTitle = item.workingTitle.slice(splitLocation);
+				item.workingTitle = item.workingTitle.slice(0, splitLocation);
+			}
+
+			/*
+			/////////
 			item.lotItems = [];
 			item.thirdPartyTargetBrand = [];
 			// var titleParts = item.workingTitle.replace(/[^a-z0-9 ]+/gi,'').split(" "); //do we need to parse this?
@@ -627,6 +682,7 @@ class EbayParser
 				}
 				item.workingTitle = titleParts.join(" ");
 			}
+			*/
 			// dd(item);
 			resolve(item);
 		});
@@ -760,6 +816,7 @@ class EbayParser
 					var words = [];
 					var extractions = [];
 					var cleanup = {};
+					var splits = [];
 					results.forEach(function(row){
 						//account for pattern boundaries
 						if(row.padded == 1) {
@@ -775,10 +832,14 @@ class EbayParser
 						if(row.action_type == 3){
 							cleanup[row.replace_str] = row.search_str;
 						}
+						if(row.action_type == 4){
+							splits.push(row.search_str);
+						}
 					})
 					self.replacementWordSet = words; 
 					self.featureExtractionWordSet = extractions;
 					self.cleanupWordSet = cleanup; 
+					self.splitWordSet = splits;
 
 					resolve(true);
 				}
@@ -955,10 +1016,12 @@ class EbayParser
 		});	
 	}
 
-	fetchClassifyFromFeatures(features)
+	fetchClassifyFromFeatures(features, brandName = "")
 	{
+		var self = this;
+
 		return new Promise(function(resolve,reject) {
-			var query = 'SELECT id ';
+			var query = 'SELECT id, title ';
 			features.forEach(function(feature){
 				// feature->>"$.features.aperture[0]" = "2.8"
 				// if(typeof(feature.value)=="object") {
@@ -966,12 +1029,21 @@ class EbayParser
 				// }
 			})
 
-			query += ' FROM ebay_prototypes WHERE id IS NOT NULL ';
+			query += ' FROM ebay_prototypes ';
+
+			if(brandName.length > 0) {
+				query += ' WHERE feature->>"$.brandName" = "'+brandName+'" ';
+			} else {
+				query += ' WHERE id IS NOT NULL ';
+			}
 
 			features.forEach(function(feature){
 				// feature->>"$.features.aperture[0]" = "2.8"
 				if(typeof(feature.value)=="object") {
 					query += ' AND JSON_OVERLAPS( feature->>"$.features.'+feature.attribute+`", '`+JSON.stringify(feature.value)+`') `;
+					// feature.value.forEach(function(row){
+					// 	query += ' AND JSON_CONTAINS( feature->>"$.features.'+feature.attribute+`", '`+row+`') `;
+					// });
 				} else {
 					query += ' AND feature->>"$.features.'+feature.attribute+'[0]" = "'+feature.value+'" ';
 				}
@@ -984,11 +1056,15 @@ class EbayParser
 					throw error;
 					reject();
 				} else {
-					/*
-					if(results.length == 0) {
-						dd([features, query]);
-					}*/
-					resolve(results);
+					
+					if(results.length == 0 && features.length > 1) {
+						features.pop();
+						// dd([features, query]);
+						self.fetchClassifyFromFeatures(features, brandName)
+						.then(classifiedIdSalvage => resolve(classifiedIdSalvage)); // recursive fun, watch this in the future
+					} else {
+						resolve(results);
+					}
 					/*
 					var idSet = [];
 					results.forEach(function(row){
