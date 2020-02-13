@@ -38,7 +38,9 @@ function getBaseSearch()
 				    		post.attr.id,
 				    		post.attr['date-gmt'],
 				    		post['photo-caption'],
-				    		post['photo-url'].shift()['#text']
+				    		post['photo-url'].shift()['#text'],
+				    		null,
+				    		null
 				    	];
 				    	postSet.push(postExtact);
 		    		});
@@ -61,31 +63,35 @@ function getBaseSearch()
 
     function writePosts(postSet)
     {
-    	var queryString = `INSERT IGNORE INTO tumblr_posts
-		(tumblr_id, post_time, caption, photo)
+    	var queryString = `INSERT INTO tumblr_posts
+		(tumblr_id, post_time, caption, photo, price, product_name)
 		VALUES
 		?
+		ON DUPLICATE KEY 
+		UPDATE 
+		price = VALUES(price),
+		product_name = VALUES(product_name)
 		`;
 		connection.query(queryString, [postSet], function (error, result) {
 			if (error) {
 				throw error;
 			} else {
-				getBaseSearch();
+				// getBaseSearch();
+				parsePosts();
 				// console.log("updated");
 				// console.log(result);
 			}
 		});	
     }
 
-    function parsePosts(num=10)
+    function parsePosts(num=200)
     {
     	connection.query(`
-		SELECT id, caption
+		SELECT tumblr_id, caption
 		FROM tumblr_posts
+		#WHERE caption NOT LIKE "%price%"
+		WHERE product_name IS NULL
 		LIMIT ?
-		# ON DUPLICATE KEY 
-		# UPDATE json_data = VALUES(json_data),
-		# UPDATE belongs_to = VALUES(belongs_to)
 		`, num, function (error, results, fields) {
 			if (error) {
 				throw error;
@@ -93,22 +99,33 @@ function getBaseSearch()
 				var items = [];
 				results.forEach(function(result){
 					// var name = result.caption.split("\n"); //.shift();
+					var name, price;
+					
 					var regex = new RegExp('[^(]+',"i");
-					// var regex = new RegExp('price: ?\$([0-9.]+)',"i");
 					var matches = result.caption.match(regex);
 					if(matches != null) {
-						var name = matches[0];
+						name = matches[0].replace(/used/gi,"").slice(0,127);
+					}
+
+					var priceRegex = new RegExp('(?<=price: ?\\$)([0-9.,]+)',"gi");  //
+					var priceMatch = result.caption.match(priceRegex);
+					if(priceMatch != null) {
+						price = priceMatch[0].replace(/,/gi,"");;
+					} else {
+						price = null;
 					}
 					//price: ?\$([0-9.]+)
-					items.push([result.id, name]);
+					items.push([result.tumblr_id, null, null, null, price, name]);
 				});
-				dd(items);
 				if(items.length > 0) {
-					updateBelongJson(items);
+					console.log("updating "+items.length+" rows");
+					writePosts(items);
+					// updateBelongJson(items);
 				}
 			}
 		});	
     }
+
 
     //getBaseSearch();
     parsePosts();
