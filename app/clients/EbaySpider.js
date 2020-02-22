@@ -276,6 +276,119 @@ var feedPrototypes = [];
 		});	
 	}
 
+	function getBrands()
+	{
+		return new Promise(function(resolve,reject) {
+			connection.query(`
+			SELECT
+			id, name
+			FROM alpha_brands
+			;`, null, function (error, results, fields) {
+				if (error) {
+					throw error;
+				} else {
+					var brands = [];
+					results.forEach(function(result){
+						brands.push({id: result.id, name:result.name});
+					})
+				}
+				resolve(brands);
+			});	
+		});
+	}
+
+	function getModels()
+	{
+		return new Promise(function(resolve,reject) {
+			connection.query(`
+			SELECT
+			model
+			FROM(
+				SELECT
+				belongs_json->>'$."film-cameras".Model[0]' as model
+				FROM ebay_spider_items
+				WHERE belongs_json->>'$."film-cameras".Model[0]' IS NOT NULL
+				AND json_data->>'$.title' LIKE '%Nikon%'
+				ORDER BY id DESC
+			) as t
+			WHERE model IS NOT NULL
+			group by model
+			ORDER BY model # DESC
+			;`, null, function (error, results, fields) {
+				if (error) {
+					throw error;
+				} else {
+					var models = [];
+					results.forEach(function(result){
+						models.push(result.model);
+					})
+				}
+				resolve(models);
+			});	
+		});
+	}
+
+	function initialProductSetup()
+	{
+		var brands, models;
+		getBrands()
+		.then(resultBrands => {
+			brands = resultBrands;
+			getModels()
+			.then(resultModels => {
+					models = resultModels;
+					simpleParse(brands,models);
+				});
+			});
+	}
+
+	function simpleParse(brands, models)
+	{
+		var categoryId = 3; //film-cameras
+		var brandedProducts = {};
+		brands.forEach(function(brand){
+			brandedProducts[brand.name.toLowerCase()] = {
+				brandId: brand.id,
+				name: brand.name,
+				products:[]};
+		})
+		
+		models.forEach(function(model){
+			var modelParts = model.split(" ");
+			if(brandedProducts[modelParts[0].toLowerCase()]){
+				brandedProducts[modelParts.shift().toLowerCase()].products.push(modelParts.join(" "));
+			}
+		})
+
+		brands.forEach(function(brand){
+			if(brandedProducts[brand.name.toLowerCase()].products.length>0)
+			{
+				var products = [];
+				brandedProducts[brand.name.toLowerCase()].products.forEach(function(product) {
+					products.push([product, categoryId, brand.id]);
+				});
+				writeProducts(products);
+			}
+		});
+	}
+
+	function writeProducts(products)
+	{
+		connection.query(`
+		INSERT IGNORE INTO alpha_products
+		(name, category_id, brand_id)
+		VALUES
+		?
+		;`, [products], function (error) {
+			if (error) {
+				throw error;
+			} else {
+				console.log("Updated "+products.length+" products");
+			}
+			
+		});	
+	}
+
 	function updateBelongJson(items)
 	{
 		// console.log(items);
@@ -313,5 +426,5 @@ var feedPrototypes = [];
 
     // breakUpSideNav(baseLenses);
     // parseBelongData(100);
-	loadSearchURLs();
-
+	// loadSearchURLs();
+	initialProductSetup();
