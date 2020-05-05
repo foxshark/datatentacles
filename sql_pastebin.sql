@@ -150,3 +150,91 @@ AND JSON_LENGTH(feature->>"$.features.focal_length") != 0
 AND JSON_LENGTH(feature->>"$.features.aperture") != 0
 ORDER BY focal_length ASC, aperture ASC
 ;
+
+
+#generate ig_users
+INSERT IGNORE
+INTO ig_users
+(user_id, username, post_count)
+SELECT
+user_id,
+MAX(username) as username,
+count(*) as post_count
+FROM (
+	SELECT
+	json_data->>"$.owner.id" as user_id,
+	json_data->>"$.owner.username" as username
+	FROM ig_posts_details
+-- 	LIMIT 10
+) s
+GROUP BY user_id
+ORDER BY user_id ASC
+;
+
+# find brand&models
+SELECT 
+COUNT(*) as ct,
+category, 
+IFNULL(main_brand, alt_brand) as brand, 
+model
+FROM (
+	SELECT
+	category, brand as main_brand, model,
+	SUBSTRING_INDEX( model, ' ', 1 ) as alt_brand
+	FROM (
+		SELECT 
+		JSON_UNQUOTE(JSON_EXTRACT(JSON_KEYS(belongs_json),'$[0]')) as category,
+		COALESCE(
+			belongs_json->>'$."film-cameras".Brand[0]',
+			belongs_json->>'$."digital-cameras".Brand[0]',
+			belongs_json->>'$.lenses.Brand[0]' ) as brand,
+		COALESCE(
+			belongs_json->>'$."film-cameras".Model[0]',
+			belongs_json->>'$."digital-cameras".Model[0]',
+			belongs_json->>'$.lenses.Model[0]' ) as model
+		FROM 
+		ebay_spider_items
+	) as q1
+) as q2
+WHERE model IS NOT NULL
+GROUP BY category, brand, model
+ORDER BY ct DESC
+;
+
+# find brand&models - just film cameras
+SELECT 
+COUNT(*) as ct, 
+model, alpha_brand_name, alpha_brand_id, 
+ap.name as alpha_product_name,
+ap.id as alpha_product_id
+FROM (
+	SELECT 
+	IFNULL(main_brand, alt_brand) as brand, 
+	if(main_brand = alt_brand, SUBSTR(model, CHAR_LENGTH(main_brand)+2 ), model) as model
+	FROM (
+		SELECT
+		brand as main_brand,
+		model,
+		SUBSTRING_INDEX( model, ' ', 1 ) as alt_brand
+		FROM (
+			SELECT 
+				belongs_json->>'$."film-cameras".Brand[0]' as brand,
+				belongs_json->>'$."film-cameras".Model[0]' as model
+			FROM 
+			ebay_spider_items
+			WHERE belongs_json->>'$."film-cameras".Model[0]' IS NOT NULL
+		) as q1
+	) as q2
+) as q3,
+( SELECT
+	IFNULL(parent_id, ID) as alpha_brand_id,
+	name as alpha_brand_name
+	FROM alpha_brands
+) as ab,
+alpha_products as ap
+WHERE q3.brand = ab.alpha_brand_name
+AND model = ap.name
+AND ap.category_id = 3 # film-cameras
+GROUP BY brand, model, alpha_brand_id, alpha_product_id
+ORDER BY  ct DESC
+;
