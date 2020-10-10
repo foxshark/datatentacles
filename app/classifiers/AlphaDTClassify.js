@@ -235,6 +235,31 @@ class AlphaDTClassifty
 		});
 	}
 
+	// *****
+	// expects string, returns array
+	// *****
+	tokenizeSplit(text, returnAsFullObject = true)
+	{
+		var result = {};
+		var regex = new RegExp(this._rules.splitWordSet[0],"gi"); //assume 1 for now
+		var splitLocation = text.search(regex);
+		if(splitLocation > 0) //ignore if it's at the start
+		{
+			result.primaryItem = text.slice(0, splitLocation);
+			result.includedItems = text.slice(splitLocation);
+		} else {
+			result.primaryItem = text;
+			result.includedItems = null;
+		}
+
+		if(returnAsFullObject)
+		{
+			return result;
+		} else {
+			return result.primaryItem;
+		}
+	}
+
 
 	sanityCheck()
 	{

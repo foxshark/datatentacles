@@ -238,3 +238,26 @@ AND ap.category_id = 3 # film-cameras
 GROUP BY brand, model, alpha_brand_id, alpha_product_id
 ORDER BY  ct DESC
 ;
+
+# SET TRAINING DATA
+SELECT @brand := "Panasonic";
+UPDATE spider_training_set_digicams
+SET training = JSON_SET(COALESCE(training,'{}'), "$.brand" , @brand)
+WHERE classification->>"$.x_brand" = @brand
+AND training->>"$.brand" IS NULL
+ORDER BY MD5(id) DESC
+LIMIT 1000;
+UPDATE spider_training_set_digicams
+SET training = JSON_SET(COALESCE(training,'{}'), "$.brand" , @brand),
+training = JSON_SET(COALESCE(training,'{}'), "$.test" , TRUE)
+WHERE classification->>"$.x_brand" = @brand
+AND training->>"$.brand" IS NULL
+ORDER BY MD5(id) DESC
+LIMIT 100;
+
+
+
+-- # cover your shame
+-- UPDATE spider_training_set_digicams
+-- SET classification = JSON_REMOVE(classification, "$.t_product")
+-- WHERE classification->>"$.t_product" IS NOT NULL;
