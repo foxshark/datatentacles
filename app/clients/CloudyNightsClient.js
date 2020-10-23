@@ -77,8 +77,9 @@ function fetchCNFeed(feedUrl, page=0)
 							
 						};
 
-						classifiedItem.content = contentParts.filter(Boolean).join();
-
+						// formatting
+						classifiedItem.price = isNaN(classifiedItem.price) ? null : classifiedItem.price;
+						classifiedItem.content = contentParts.filter(Boolean).join(); //drop empty vals
 
 
 						// var storage = [];
