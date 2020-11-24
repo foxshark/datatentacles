@@ -11,6 +11,15 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
+const TRAINING_SET_CATEGORY = 1;	//category
+const TRAINING_SET_DIGITAL_CAMERA_MODELS = 2;	//digital camera models
+const TRAINING_SET_PRODUCTS = 3;	//products
+const TRAINING_SET_BRANDS = 4;	//brands 1
+const TRAINING_SET_TYPE_CLASSIFIER = 5;	//type classifier - 5/19/2020
+const TRAINING_SET_CANON_DIGITAL_CAMERA_PRODUCTS = 6;	//canon digital camera products
+
+
+
 const dd = function(x)
 	{
 		console.log("************");
@@ -58,8 +67,8 @@ function classifyThings(aParse=null){
 	// 		resolve(classifier);
 	// 	});
 
-	getFeatureClassifierFromSet(6) // Products, Canon Digital Cameras 
-	.then(classifier=>workClassifier(classifier, "product", 1000, "t"))
+	getFeatureClassifierFromSet(TRAINING_SET_CANON_DIGITAL_CAMERA_PRODUCTS) // Products, Canon Digital Cameras 
+	.then(classifier=>workClassifier(classifier, "product", 10, "t"))
 		.then(results=>{
 			dd(results)
 			process.exit()
