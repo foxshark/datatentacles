@@ -1,2 +1,0 @@
-(?<![a-z])(?:[a-z]+-nikkor|nikonos|noct|medical|bellows|reflex|series_e|pre_ai|m\wcro|[a-z]{1,3})(?!\w) //new gneric lens features
-(?<![a-z])(if|w|h|o|d|g|p|r|uw|lw|fl|aw|cx|sw|el|ed|ai|af|dx|fx|apo|swm|vr|micro|macro|nikonos)-?[a-z]?(?!\w) //older more specific lens attributes
