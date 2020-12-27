@@ -1,0 +1,14 @@
+{
+  "dbConfig": {
+    "host"     : "127.0.0.1",
+    "user"     : "root",
+    "password" : "hunter12",
+    "database" : "clevername"
+  },
+  "PCrawl" : {
+    "API" : {
+      "normalToken" : "abc123qwerty",
+      "jsToken" : "xyz098asdf"
+    }
+  }
+}
