@@ -36,6 +36,7 @@
     "moment": "^2.24.0",
     "mysql": "^2.17.1",
     "natural": "^1.0.2",
+    "proxycrawl": "^2.1.4",
     "rss-parser": "^3.7.3"
   }
 }
