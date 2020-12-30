@@ -23,16 +23,16 @@ class GenericPCrawlClient
 		console.log("Fetching page: "+fetchURL)
 		var self = this;
 		return new Promise(function(resolve, reject) {
-			var response = JSON.parse(self.getFakeRequest());
-			resolve(response);
-			// self.crawler.get(fetchURL, {
-			//   userAgent: 'Mozilla/5.0 (Windows NT 6.2; rv:20.0) Gecko/20121202 Firefox/30.0',
-			//   format: 'json'
-			// }).then(response => {
-			//   if (response.statusCode === 200) {
-			//     console.log(response.body);
-			//   }
-			// }).catch(error => console.error);
+			// var response = JSON.parse(self.getFakeRequest());
+			// resolve(response);
+			self.crawler.get(fetchURL, {
+			  userAgent: 'Mozilla/5.0 (Windows NT 6.2; rv:20.0) Gecko/20121202 Firefox/30.0',
+			  format: 'json'
+			}).then(response => {
+			  if (response.statusCode === 200) {
+			    console.log(response.body);
+			  }
+			}).catch(error => console.error);
 		});
 	}
 
